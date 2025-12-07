@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PriceAction Pro</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            750: '#2d3b4f', // Custom intermediary shade
+                            850: '#1a2230', // Darker background
+                            900: '#0f172a',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.0"></script>
+
+    <style>
+        /* Custom Scrollbar for Time Filter on Mobile */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Chart Container Height */
+        .chart-wrapper {
+            position: relative;
+            width: 100%;
+        }
+        .main-chart {
+            height: 300px;
+        }
+        .rsi-chart {
+            height: 150px;
+        }
+        
+        @media (min-width: 768px) {
+            .main-chart {
+                height: 400px;
+            }
+            .rsi-chart {
+                height: 180px;
+            }
+        }
+
+        /* Mobile Tap Highlights */
+        button {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen selection:bg-blue-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+            <!-- Logo (Icon only on mobile) -->
+            <div class="flex items-center gap-2 shrink-0">
+                <div class="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/20">
+                    <i data-lucide="activity" class="text-white w-5 h-5"></i>
+                </div>
+                <h1 class="hidden sm:block text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">
+                    PriceAction<span class="font-light text-slate-400">Pro</span>
+                </h1>
+            </div>
+
+            <!-- Search Form -->
+            <form id="searchForm" class="relative w-full max-w-md">
+                <input 
+                    type="text" 
+                    id="searchInput"
+                    placeholder="Search (e.g. AAPL)..." 
+                    class="w-full bg-slate-800 border border-slate-700 rounded-full py-2 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all shadow-inner"
+                    autocomplete="off"
+                >
+                <i data-lucide="search" class="absolute left-3.5 top-2.5 text-slate-400 w-4 h-4"></i>
+            </form>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6 pb-20">
+        
+        <!-- Loading State -->
+        <div id="loader" class="hidden h-[60vh] flex flex-col items-center justify-center text-slate-400">
+            <i data-lucide="loader-2" class="animate-spin mb-4 text-blue-500 w-10 h-10"></i>
+            <p class="animate-pulse">Analyzing Market Data...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorMsg" class="hidden h-[60vh] flex flex-col items-center justify-center text-rose-400 text-center">
+            <i data-lucide="alert-circle" class="mb-4 opacity-80 w-12 h-12"></i>
+            <p id="errorText" class="text-lg font-medium">Unable to load data</p>
+            <p class="text-sm text-slate-500 mt-2">Check the symbol or try again later.</p>
+        </div>
+
+        <!-- Dashboard Content -->
+        <div id="dashboard" class="space-y-6 opacity-0 transition-opacity duration-500">
+            
+            <!-- Top Info Bar -->
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h2 id="stockSymbol" class="text-3xl font-bold text-white tracking-tight">--</h2>
+                    <div class="flex items-center gap-3 mt-1">
+                        <span id="currentPrice" class="text-4xl font-bold text-white">$0.00</span>
+                        <div id="priceChangeBadge" class="flex items-center px-2 py-1 rounded-md text-sm font-bold bg-slate-800 text-slate-400">
+                            --
+                        </div>
+                    </div>
+                    <p id="lastDate" class="text-slate-500 text-xs font-mono mt-1">--</p>
+                </div>
+
+                <!-- Time Filter (Scrollable on mobile) -->
+                <div class="w-full md:w-auto overflow-x-auto hide-scrollbar">
+                    <div class="flex bg-slate-800 p-1 rounded-lg border border-slate-700 min-w-max" id="timeFilters">
+                        <!-- Buttons injected via JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                <!-- Card 1: Range Gauge -->
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col justify-between">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-slate-400 text-xs font-medium uppercase tracking-wider">Range</span>
+                        <i data-lucide="calendar" class="text-blue-400 w-4 h-4"></i>
+                    </div>
+                    
+                    <div class="mt-1 relative">
+                        <!-- Text Labels -->
+                        <div class="flex justify-between text-[10px] text-slate-400 font-mono mb-1.5">
+                            <span id="rangeLowText" class="truncate max-w-[45%]">--</span>
+                            <span id="rangeHighText" class="truncate max-w-[45%] text-right">--</span>
+                        </div>
+                        
+                        <!-- Track -->
+                        <div class="h-2 bg-slate-700 rounded-full w-full relative">
+                            <div id="rangeDot" class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-blue-500 border-2 border-slate-900 rounded-full shadow-lg shadow-blue-500/50 transition-all duration-700 ease-out z-10" style="left: 50%; transform: translate(-50%, -50%);"></div>
+                            <div id="rangeFill" class="absolute top-0 left-0 h-full bg-blue-500/20 rounded-full transition-all duration-700 ease-out" style="width: 50%"></div>
+                        </div>
+                        <div class="mt-1 text-center">
+                            <span class="text-[10px] text-slate-500">Current Position</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-slate-400 text-xs font-medium uppercase tracking-wider">Volume</span>
+                        <i data-lucide="bar-chart-2" class="text-purple-400 w-4 h-4"></i>
+                    </div>
+                    <div id="statVolume" class="text-lg sm:text-xl font-bold text-white mb-1 truncate">--</div>
+                    <div id="statAvgVol" class="text-xs text-slate-500">Avg: --</div>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-slate-400 text-xs font-medium uppercase tracking-wider">Open</span>
+                        <i data-lucide="activity" class="text-orange-400 w-4 h-4"></i>
+                    </div>
+                    <div id="statOpen" class="text-lg sm:text-xl font-bold text-white mb-1">--</div>
+                    <div class="text-xs text-slate-500">Start of Day</div>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-slate-400 text-xs font-medium uppercase tracking-wider">Close</span>
+                        <i data-lucide="activity" class="text-indigo-400 w-4 h-4"></i>
+                    </div>
+                    <div id="statClose" class="text-lg sm:text-xl font-bold text-white mb-1">--</div>
+                    <div class="text-xs text-slate-500">End of Day</div>
+                </div>
+            </div>
+
+            <!-- Chart Section -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
+                <div class="p-3 md:p-4 border-b border-slate-700 flex flex-wrap justify-between items-center gap-2">
+                    <h3 class="font-semibold text-slate-200 flex items-center gap-2 text-sm md:text-base">
+                        <i data-lucide="trending-up" class="text-blue-400 w-4 h-4"></i>
+                        Price Action, MA & RSI
+                    </h3>
+                    <div class="flex gap-3 text-[10px] md:text-xs font-medium">
+                         <div class="flex items-center gap-1 text-amber-400">
+                            <div class="w-2 h-2 rounded-full bg-amber-400"></div> 20 MA
+                        </div>
+                        <div class="flex items-center gap-1 text-indigo-400">
+                            <div class="w-2 h-2 rounded-full bg-indigo-400"></div> 50 MA
+                        </div>
+                        <div class="flex items-center gap-1 text-fuchsia-400">
+                            <div class="w-2 h-2 rounded-full bg-fuchsia-400"></div> RSI
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-2 md:p-4 w-full space-y-2">
+                    <!-- Main Chart -->
+                    <div class="chart-wrapper main-chart">
+                        <canvas id="stockChart"></canvas>
+                    </div>
+                    <!-- RSI Chart -->
+                    <div class="chart-wrapper rsi-chart border-t border-slate-700/50 pt-2">
+                        <canvas id="rsiChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PROBABILITY & STATS SECTION -->
+            <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                <div class="p-4 border-b border-slate-700 bg-slate-800/50">
+                     <h3 class="text-sm font-bold text-white uppercase tracking-wide flex items-center gap-2">
+                        <i data-lucide="calculator" class="text-emerald-400 w-4 h-4"></i>
+                        Price Action Probability Engine
+                        <span id="probTimeframeLabel" class="ml-auto text-[10px] font-normal text-slate-500 bg-slate-900 px-2 py-1 rounded">Based on Range Data</span>
+                     </h3>
+                </div>
+                
+                <div class="p-5 grid grid-cols-1 md:grid-cols-2 gap-8">
+                    
+                    <!-- Left: Historical Stats -->
+                    <div>
+                         <h4 class="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2">
+                            <i data-lucide="history" class="w-3 h-3"></i> Historical Behavior
+                         </h4>
+                         <div class="space-y-3">
+                            <!-- Win Rate -->
+                            <div class="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                <div>
+                                    <span class="text-slate-300 text-sm font-medium block">Bullish Days Frequency</span>
+                                    <span class="text-slate-500 text-[10px]">How often stock closes Green</span>
+                                </div>
+                                <span id="statWinRate" class="text-emerald-400 font-mono font-bold text-lg">--%</span>
+                            </div>
+
+                            <!-- Avg Volatility -->
+                            <div class="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                                <div>
+                                    <span class="text-slate-300 text-sm font-medium block">Avg Daily Volatility</span>
+                                    <span class="text-slate-500 text-[10px]">Average range (High - Low)</span>
+                                </div>
+                                <span id="statAvgVolPct" class="text-blue-400 font-mono font-bold text-lg">--%</span>
+                            </div>
+                         </div>
+                    </div>
+
+                    <!-- Right: Next Day Forecast -->
+                    <div>
+                         <h4 class="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2">
+                            <i data-lucide="zap" class="w-3 h-3 text-amber-400"></i> Next Session Forecast
+                         </h4>
+                         
+                         <div class="bg-slate-700/30 p-4 rounded-xl border border-slate-700 relative overflow-hidden">
+                            <!-- Dynamic Content based on calculations -->
+                             <div class="relative z-10">
+                                 <div class="flex justify-between items-end mb-2">
+                                     <span class="text-slate-400 text-xs">If Recent Candle was:</span>
+                                     <span id="lastCandleType" class="text-xs font-bold px-2 py-0.5 rounded bg-slate-600">--</span>
+                                 </div>
+                                 
+                                 <div class="text-3xl font-bold text-white mb-1" id="predictionText">--%</div>
+                                 <div class="text-sm text-slate-400 mb-4">Historical probability of closing <span class="text-emerald-400 font-bold">GREEN</span> next session.</div>
+
+                                 <!-- Visual Bar -->
+                                 <div class="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                                     <div id="predictionBar" class="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 w-0 transition-all duration-1000"></div>
+                                 </div>
+                             </div>
+                         </div>
+
+                         <div class="mt-4 grid grid-cols-2 gap-3">
+                             <div class="text-center p-2 rounded bg-slate-900/30 border border-slate-700/30">
+                                 <div class="text-[10px] text-slate-500 uppercase">After Green Day</div>
+                                 <div id="probAfterGreen" class="text-sm font-mono font-bold text-emerald-400">--%</div>
+                             </div>
+                             <div class="text-center p-2 rounded bg-slate-900/30 border border-slate-700/30">
+                                 <div class="text-[10px] text-slate-500 uppercase">After Red Day</div>
+                                 <div id="probAfterRed" class="text-sm font-mono font-bold text-rose-400">--%</div>
+                             </div>
+                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Insights (Existing) -->
+             <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+                 <h3 class="text-sm font-semibold mb-4 text-white uppercase tracking-wide">Snapshot Insights</h3>
+                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="bg-slate-700/30 p-3 rounded-lg border border-slate-700/50">
+                      <span class="text-slate-400 text-xs block mb-1">Period High</span>
+                      <span id="insightHigh" class="text-white text-lg font-mono font-bold">--</span>
+                    </div>
+                    <div class="bg-slate-700/30 p-3 rounded-lg border border-slate-700/50">
+                      <span class="text-slate-400 text-xs block mb-1">Period Low</span>
+                      <span id="insightLow" class="text-white text-lg font-mono font-bold">--</span>
+                    </div>
+                    <div class="bg-slate-700/30 p-3 rounded-lg border border-slate-700/50">
+                      <span class="text-slate-400 text-xs block mb-1">Trading Days</span>
+                      <span id="insightDays" class="text-white text-lg font-mono font-bold">--</span>
+                    </div>
+                 </div>
+              </div>
+
+        </div>
+    </main>
+
+    <!-- App Logic -->
+    <script>
+        // --- Configuration ---
+        const API_KEY = 'gEZA1HnJ4wGa3bbLcjBluU43hr3T8GKs';
+        const BASE_URL = 'https://financialmodelingprep.com/stable/historical-price-eod/full';
+
+        // --- State ---
+        let currentSymbol = 'AAPL';
+        let fullData = []; 
+        let chartInstance = null;
+        let rsiChartInstance = null;
+        let activeRange = '1Y'; // Default
+
+        // --- Formatting Helpers ---
+        const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+        const formatNumber = (num) => {
+            if (num > 1000000000) return (num / 1000000000).toFixed(1) + 'B';
+            if (num > 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num > 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        };
+
+        // --- Core Logic ---
+
+        async function init() {
+            lucide.createIcons();
+            setupEventListeners();
+            await loadStock(currentSymbol);
+        }
+
+        function setupEventListeners() {
+            // Search
+            document.getElementById('searchForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('searchInput');
+                const val = input.value.trim().toUpperCase();
+                if (val) {
+                    loadStock(val);
+                    input.value = '';
+                    input.blur(); // Close keyboard on mobile
+                }
+            });
+
+            // Time Filters
+            const ranges = ['5D', '1M', '3M', '6M', '1Y', '5Y', 'ALL'];
+            const container = document.getElementById('timeFilters');
+            
+            ranges.forEach(r => {
+                const btn = document.createElement('button');
+                btn.textContent = r;
+                btn.className = `px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap snap-center ${
+                    r === activeRange ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                }`;
+                btn.onclick = () => {
+                    activeRange = r;
+                    updateFilterUI(container);
+                    renderDashboard();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function updateFilterUI(container) {
+            Array.from(container.children).forEach(btn => {
+                if (btn.textContent === activeRange) {
+                    btn.className = 'px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap snap-center bg-blue-600 text-white shadow-md';
+                } else {
+                    btn.className = 'px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap snap-center text-slate-400 hover:text-white hover:bg-slate-700';
+                }
+            });
+        }
+
+        async function loadStock(symbol) {
+            currentSymbol = symbol;
+            
+            // UI States
+            document.getElementById('loader').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('opacity-100');
+            document.getElementById('errorMsg').classList.add('hidden');
+
+            try {
+                const response = await fetch(`${BASE_URL}?symbol=${symbol}&apikey=${API_KEY}`);
+                if (!response.ok) throw new Error('Network error');
+                
+                const json = await response.json();
+                if (!json || json.length === 0) throw new Error('Symbol not found');
+
+                // Sort Oldest -> Newest
+                const sorted = [...json].sort((a, b) => new Date(a.date) - new Date(b.date));
+                
+                // Process Technical Indicators (MA + RSI)
+                fullData = processIndicators(sorted);
+
+                // Render
+                renderDashboard();
+                
+                document.getElementById('loader').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                setTimeout(() => document.getElementById('dashboard').classList.add('opacity-100'), 50);
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('loader').classList.add('hidden');
+                document.getElementById('errorMsg').classList.remove('hidden');
+                document.getElementById('errorText').textContent = `Could not load "${symbol}"`;
+            }
+        }
+
+        // New Probability Engine
+        function calculateProbabilityStats(data) {
+            // Update Label
+            document.getElementById('probTimeframeLabel').textContent = `Based on ${activeRange} Data`;
+
+            // Use the passed filtered data directly to make stats dynamic
+            const subset = data;
+            
+            // Need at least 2 points to compare previous vs current
+            if (subset.length < 2) {
+                // Clear UI if not enough data
+                document.getElementById('statWinRate').textContent = '--%';
+                document.getElementById('statAvgVolPct').textContent = '--%';
+                document.getElementById('predictionText').textContent = '--%';
+                return;
+            }
+            
+            let greenDays = 0;
+            let sumVol = 0;
+            
+            // Conditional Counts
+            let totalGreenDays = 0;
+            let greenAfterGreen = 0;
+            
+            let totalRedDays = 0;
+            let greenAfterRed = 0;
+
+            // Loop starting from 1 to compare with previous
+            for (let i = 1; i < subset.length; i++) {
+                const prev = subset[i-1];
+                const curr = subset[i];
+                
+                const isPrevGreen = prev.close > prev.open;
+                const isCurrGreen = curr.close > curr.open;
+                
+                // Volatility: (High - Low) / Open
+                const vol = (curr.high - curr.low) / curr.open;
+                sumVol += vol;
+
+                if (isCurrGreen) greenDays++;
+
+                if (isPrevGreen) {
+                    totalGreenDays++;
+                    if (isCurrGreen) greenAfterGreen++;
+                } else {
+                    totalRedDays++;
+                    if (isCurrGreen) greenAfterRed++;
+                }
+            }
+
+            // Calculations
+            const winRate = (greenDays / (subset.length - 1)) * 100;
+            const avgVol = (sumVol / (subset.length - 1)) * 100;
+            
+            const probUpAfterUp = totalGreenDays > 0 ? (greenAfterGreen / totalGreenDays) * 100 : 0;
+            const probUpAfterDown = totalRedDays > 0 ? (greenAfterRed / totalRedDays) * 100 : 0;
+
+            // Determine Prediction based on the VERY LAST COMPLETED candle
+            const lastCandle = subset[subset.length - 1];
+            const isLastGreen = lastCandle.close > lastCandle.open;
+            
+            const forecastProb = isLastGreen ? probUpAfterUp : probUpAfterDown;
+
+            // UI Updates
+            document.getElementById('statWinRate').textContent = winRate.toFixed(1) + '%';
+            document.getElementById('statAvgVolPct').textContent = avgVol.toFixed(2) + '%';
+            
+            document.getElementById('probAfterGreen').textContent = probUpAfterUp.toFixed(1) + '%';
+            document.getElementById('probAfterRed').textContent = probUpAfterDown.toFixed(1) + '%';
+
+            // Prediction UI
+            const predictionEl = document.getElementById('predictionText');
+            const candleTypeEl = document.getElementById('lastCandleType');
+            const barEl = document.getElementById('predictionBar');
+            
+            candleTypeEl.textContent = isLastGreen ? 'GREEN' : 'RED';
+            candleTypeEl.className = isLastGreen 
+                ? 'text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                : 'text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30';
+
+            predictionEl.textContent = forecastProb.toFixed(1) + '%';
+            // Color code the prediction
+            predictionEl.className = forecastProb > 50 
+                ? "text-3xl font-bold text-emerald-400 mb-1" 
+                : "text-3xl font-bold text-slate-200 mb-1";
+            
+            // Animate bar
+            setTimeout(() => {
+                barEl.style.width = `${forecastProb}%`;
+            }, 100);
+        }
+
+        // Calculate MAs and RSI
+        function processIndicators(data) {
+             const periodRSI = 14;
+             let processedData = [];
+
+             // State for RSI
+             let prevAvgGain = 0;
+             let prevAvgLoss = 0;
+
+             for (let index = 0; index < data.length; index++) {
+                 const item = data[index];
+                 const newItem = { ...item };
+
+                 // --- MAs ---
+                 // 20 MA
+                 if (index >= 19) {
+                     let sum = 0;
+                     for(let j=0; j<20; j++) sum += data[index-j].close;
+                     newItem.ma20 = sum / 20;
+                 } else newItem.ma20 = null;
+
+                 // 50 MA
+                 if (index >= 49) {
+                     let sum = 0;
+                     for(let j=0; j<50; j++) sum += data[index-j].close;
+                     newItem.ma50 = sum / 50;
+                 } else newItem.ma50 = null;
+
+                 // --- RSI ---
+                 if (index < periodRSI) {
+                    newItem.rsi = null;
+                 } else if (index === periodRSI) {
+                    // First RSI: Simple Average
+                    let sumGain = 0;
+                    let sumLoss = 0;
+                    for (let i = 1; i <= periodRSI; i++) {
+                        const change = data[i].close - data[i-1].close;
+                        if (change >= 0) sumGain += change;
+                        else sumLoss += Math.abs(change);
+                    }
+                    prevAvgGain = sumGain / periodRSI;
+                    prevAvgLoss = sumLoss / periodRSI;
+                    
+                    const rs = prevAvgGain / (prevAvgLoss === 0 ? 0.001 : prevAvgLoss);
+                    newItem.rsi = 100 - (100 / (1 + rs));
+                 } else {
+                    // Smoothed
+                    const change = data[index].close - data[index-1].close;
+                    let currentGain = change > 0 ? change : 0;
+                    let currentLoss = change < 0 ? Math.abs(change) : 0;
+
+                    prevAvgGain = ((prevAvgGain * (periodRSI - 1)) + currentGain) / periodRSI;
+                    prevAvgLoss = ((prevAvgLoss * (periodRSI - 1)) + currentLoss) / periodRSI;
+
+                    const rs = prevAvgGain / (prevAvgLoss === 0 ? 0.001 : prevAvgLoss);
+                    newItem.rsi = 100 - (100 / (1 + rs));
+                 }
+
+                 processedData.push(newItem);
+             }
+             return processedData;
+        }
+
+
+        function filterDataByRange(data, range) {
+            if (range === 'ALL') return data;
+            
+            const now = new Date();
+            let startDate = new Date();
+
+            switch (range) {
+                case '5D': startDate.setDate(now.getDate() - 5); break;
+                case '1M': startDate.setMonth(now.getMonth() - 1); break;
+                case '3M': startDate.setMonth(now.getMonth() - 3); break;
+                case '6M': startDate.setMonth(now.getMonth() - 6); break;
+                case '1Y': startDate.setFullYear(now.getFullYear() - 1); break;
+                case '5Y': startDate.setFullYear(now.getFullYear() - 5); break;
+                default: startDate.setFullYear(now.getFullYear() - 1);
+            }
+
+            return data.filter(item => new Date(item.date) >= startDate);
+        }
+
+        function renderDashboard() {
+            const visibleData = filterDataByRange(fullData, activeRange);
+            if (visibleData.length === 0) return;
+
+            const latest = visibleData[visibleData.length - 1];
+            const prev = visibleData.length > 1 ? visibleData[visibleData.length - 2] : latest;
+
+            // --- Update Text UI ---
+            document.getElementById('stockSymbol').textContent = currentSymbol;
+            document.getElementById('currentPrice').textContent = formatCurrency(latest.close);
+            document.getElementById('lastDate').textContent = `As of ${latest.date}`;
+
+            // Badge
+            const change = latest.close - prev.close;
+            const pct = (change / prev.close) * 100;
+            const isUp = change >= 0;
+            const badge = document.getElementById('priceChangeBadge');
+            
+            badge.className = `flex items-center px-2 py-1 rounded-md text-sm font-bold ${isUp ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`;
+            badge.innerHTML = `
+                <i data-lucide="${isUp ? 'trending-up' : 'trending-down'}" class="w-4 h-4 mr-1"></i>
+                ${isUp ? '+' : ''}${change.toFixed(2)} (${pct.toFixed(2)}%)
+            `;
+            lucide.createIcons(); 
+
+            // Stats Cards Calculations
+            const periodHigh = Math.max(...visibleData.map(d => d.high));
+            const periodLow = Math.min(...visibleData.map(d => d.low));
+            const avgVol = visibleData.reduce((a, b) => a + b.volume, 0) / visibleData.length;
+
+            // Update Range Gauge
+            const currentPrice = latest.close;
+            let rangePct = ((currentPrice - periodLow) / (periodHigh - periodLow)) * 100;
+            rangePct = Math.max(0, Math.min(100, rangePct)); // Clamp 0-100
+
+            document.getElementById('rangeLowText').textContent = formatNumber(periodLow);
+            document.getElementById('rangeHighText').textContent = formatNumber(periodHigh);
+            document.getElementById('rangeDot').style.left = `${rangePct}%`;
+            document.getElementById('rangeFill').style.width = `${rangePct}%`;
+
+            // Update Other Cards
+            document.getElementById('statVolume').textContent = formatNumber(latest.volume);
+            document.getElementById('statAvgVol').textContent = `Avg: ${formatNumber(avgVol)}`;
+            document.getElementById('statOpen').textContent = formatCurrency(latest.open);
+            document.getElementById('statClose').textContent = formatCurrency(latest.close);
+
+            // Insight Cards
+            document.getElementById('insightHigh').textContent = formatCurrency(periodHigh);
+            document.getElementById('insightLow').textContent = formatCurrency(periodLow);
+            document.getElementById('insightDays').textContent = visibleData.length;
+
+            // Update Probability Stats based on current view
+            calculateProbabilityStats(visibleData);
+
+            // --- Render Chart ---
+            renderCharts(visibleData, isUp);
+        }
+
+        function renderCharts(data, isPositiveTrend) {
+            const dates = data.map(d => {
+                const date = new Date(d.date);
+                return activeRange === '5D' || activeRange === '1M' || activeRange === '3M' 
+                    ? date.toLocaleDateString('en-US', {month:'short', day:'numeric'}) 
+                    : date.toLocaleDateString('en-US', {month:'short', year:'2-digit'});
+            });
+
+            // 1. MAIN STOCK CHART
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const prices = data.map(d => d.close);
+            const volumes = data.map(d => d.volume);
+            const ma20 = data.map(d => d.ma20);
+            const ma50 = data.map(d => d.ma50);
+
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            const color = isPositiveTrend ? '#10b981' : '#ef4444'; 
+            gradient.addColorStop(0, isPositiveTrend ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)');
+            gradient.addColorStop(1, isPositiveTrend ? 'rgba(16, 185, 129, 0)' : 'rgba(239, 68, 68, 0)');
+
+            let barThickness = 3;
+            if (activeRange === '5D') barThickness = 30; 
+            else if (activeRange === '1M') barThickness = 8;
+            else if (activeRange === 'ALL') barThickness = 1;
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        { label: 'Price', data: prices, borderColor: color, backgroundColor: gradient, borderWidth: 2, pointRadius: activeRange === '5D' ? 4 : 0, pointHoverRadius: 5, fill: true, yAxisID: 'y', order: 2, tension: 0.1 },
+                        { label: '20 MA', data: ma20, borderColor: '#fbbf24', borderWidth: 1.5, pointRadius: 0, fill: false, yAxisID: 'y', order: 1 },
+                        { label: '50 MA', data: ma50, borderColor: '#818cf8', borderWidth: 1.5, pointRadius: 0, fill: false, yAxisID: 'y', order: 1 },
+                        { label: 'Volume', data: volumes, type: 'bar', backgroundColor: '#475569', borderColor: 'transparent', barThickness: barThickness, yAxisID: 'y1', order: 3, opacity: 0.3 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: { backgroundColor: '#1e293b', titleColor: '#94a3b8', bodyColor: '#f8fafc', borderColor: '#334155', borderWidth: 1 }
+                    },
+                    scales: {
+                        x: { display: false, grid: { display: false } }, // Hide X axis on top chart to stack cleanly
+                        y: { type: 'linear', display: true, position: 'left', grid: { color: '#334155', drawBorder: false }, ticks: { color: '#94a3b8', font: { size: 10 }, callback: function(value) { return '$' + value; } } },
+                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { display: false } }
+                    }
+                }
+            });
+
+            // 2. RSI CHART
+            const rsiCtx = document.getElementById('rsiChart').getContext('2d');
+            if (rsiChartInstance) rsiChartInstance.destroy();
+
+            const rsiData = data.map(d => d.rsi);
+
+            rsiChartInstance = new Chart(rsiCtx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'RSI',
+                        data: rsiData,
+                        borderColor: '#e879f9', // Fuchsia
+                        backgroundColor: 'rgba(232, 121, 249, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: false, // Don't fill RSI, keep it simple
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: { 
+                            backgroundColor: '#1e293b', titleColor: '#94a3b8', bodyColor: '#f8fafc', borderColor: '#334155', borderWidth: 1,
+                            callbacks: { label: function(context) { return 'RSI: ' + context.parsed.y.toFixed(2); } }
+                        },
+                        annotation: {
+                            annotations: {
+                                line1: { type: 'line', yMin: 70, yMax: 70, borderColor: 'rgba(148, 163, 184, 0.5)', borderWidth: 1, borderDash: [4, 4], label: { enabled: false } },
+                                line2: { type: 'line', yMin: 30, yMax: 30, borderColor: 'rgba(148, 163, 184, 0.5)', borderWidth: 1, borderDash: [4, 4], label: { enabled: false } }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { color: '#334155', drawBorder: false, tickLength: 5 }, 
+                            ticks: { color: '#94a3b8', maxTicksLimit: activeRange === '5D' ? 5 : 8, font: { size: 10 } } 
+                        },
+                        y: { 
+                            min: 0, max: 100,
+                            grid: { color: '#334155', drawBorder: false }, 
+                            ticks: { stepSize: 30, color: '#94a3b8', font: { size: 10 } } 
+                        }
+                    }
+                }
+            });
+        }
+
+        // Start App
+        init();
+    </script>
+</body>
+</html>
